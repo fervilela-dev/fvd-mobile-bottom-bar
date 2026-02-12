@@ -1,4 +1,4 @@
-# FVD-Mobile-Bottom-Bar
+# fvd-mobile-bottom-bar
 
 Versión 1.1.0
 
