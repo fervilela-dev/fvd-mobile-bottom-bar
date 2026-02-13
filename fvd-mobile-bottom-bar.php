@@ -3,7 +3,7 @@
  * Plugin Name: FVD Mobile Bottom Bar
  * Plugin URI: https://github.com/fervilela-dev/FVD-Mobile-Bottom-Bar
  * Description: Barra inferior móvil configurable + actualizaciones automáticas desde GitHub Releases (release asset ZIP).
- * Version: 1.1.0
+ * Version: 1.2.0
  * Author: FerVilela Digital Consulting
  * Author URI: https://fervilela.com
  * Text Domain: fvd-mobile-bottom-bar
@@ -39,6 +39,13 @@ final class FVD_Mobile_Bottom_Bar {
       [],
       $this->get_version()
     );
+    wp_enqueue_script(
+      'fvd-mbb',
+      plugins_url('assets/bar.js', __FILE__),
+      [],
+      $this->get_version(),
+      true
+    );
     wp_enqueue_style('dashicons');
 
     $settings = $this->get_settings();
@@ -59,18 +66,40 @@ final class FVD_Mobile_Bottom_Bar {
 
     foreach ($buttons as $index => $button) {
       $url = esc_url($button['url'] ?: '#');
+      $fallback_url = esc_url($button['url'] ?: '#');
       $color = esc_attr($button['color']);
       $size = intval($button['size']);
       $icon = esc_attr($button['icon'] ?: 'dashicons-admin-links');
-      $label = 'Botón ' . ($index + 1);
-      printf(
-        '<a href="%1$s" class="fvd-mbb__item" aria-label="%4$s" style="color:%2$s;font-size:%3$dpx;"><span class="dashicons %5$s"></span></a>',
-        $url,
-        $color,
-        $size,
-        esc_attr($label),
-        $icon
-      );
+      $label = trim($button['label'] ?? '') ?: 'Botón ' . ($index + 1);
+      $action_type = $button['action_type'] ?? 'url';
+      $provider = $button['integration_provider'] ?? 'none';
+      $selector = trim((string)($button['target_selector'] ?? ''));
+      if (!$selector) {
+        $selector = $this->get_default_selector($action_type, $provider);
+      }
+
+      if ($action_type === 'url') {
+        printf(
+          '<a href="%1$s" class="fvd-mbb__item" aria-label="%4$s" style="color:%2$s;font-size:%3$dpx;"><span class="dashicons %5$s"></span></a>',
+          $url,
+          $color,
+          $size,
+          esc_attr($label),
+          $icon
+        );
+      } else {
+        printf(
+          '<button type="button" class="fvd-mbb__item fvd-mbb__item--trigger" aria-label="%1$s" style="color:%2$s;font-size:%3$dpx;" data-fvd-action="%4$s" data-fvd-provider="%5$s" data-fvd-selector="%6$s" data-fvd-fallback="%7$s"><span class="dashicons %8$s"></span></button>',
+          esc_attr($label),
+          $color,
+          $size,
+          esc_attr($action_type),
+          esc_attr($provider),
+          esc_attr($selector),
+          $fallback_url,
+          $icon
+        );
+      }
     }
 
     echo '</div></nav>';
@@ -236,13 +265,47 @@ final class FVD_Mobile_Bottom_Bar {
             <tr>
               <th scope="row">Botones</th>
               <td>
+                <?php
+                  $action_types = $this->get_action_types();
+                  $providers = $this->get_integration_providers();
+                ?>
                 <?php for ($i = 0; $i < $settings['buttons_count']; $i++): $button = $settings['buttons'][$i]; ?>
                   <fieldset style="margin-bottom:14px;padding:12px;border:1px solid #ccd0d4;">
                     <legend style="font-weight:bold;">Botón <?php echo intval($i + 1); ?></legend>
                     <p>
-                      <label>URL<br />
+                      <label>Etiqueta accesible (aria-label) opcional<br />
+                        <input type="text" style="width:100%;" name="<?php echo esc_attr($option_name); ?>[buttons][<?php echo intval($i); ?>][label]" value="<?php echo esc_attr($button['label']); ?>" placeholder="Buscar" />
+                      </label>
+                      <span class="description">Si se deja vacío, se usa "Botón N".</span>
+                    </p>
+                    <p>
+                      <label>Tipo de acción<br />
+                        <select name="<?php echo esc_attr($option_name); ?>[buttons][<?php echo intval($i); ?>][action_type]">
+                          <?php foreach ($action_types as $value => $label): ?>
+                            <option value="<?php echo esc_attr($value); ?>" <?php selected($button['action_type'], $value); ?>><?php echo esc_html($label); ?></option>
+                          <?php endforeach; ?>
+                        </select>
+                      </label>
+                    </p>
+                    <p>
+                      <label>URL (enlace o fallback)<br />
                         <input type="url" style="width:100%;" name="<?php echo esc_attr($option_name); ?>[buttons][<?php echo intval($i); ?>][url]" value="<?php echo esc_attr($button['url']); ?>" placeholder="https://ejemplo.com" />
                       </label>
+                    </p>
+                    <p>
+                      <label>Proveedor de integración<br />
+                        <select name="<?php echo esc_attr($option_name); ?>[buttons][<?php echo intval($i); ?>][integration_provider]">
+                          <?php foreach ($providers as $value => $label): ?>
+                            <option value="<?php echo esc_attr($value); ?>" <?php selected($button['integration_provider'], $value); ?>><?php echo esc_html($label); ?></option>
+                          <?php endforeach; ?>
+                        </select>
+                      </label>
+                    </p>
+                    <p>
+                      <label>Selector CSS objetivo (opcional)<br />
+                        <input type="text" style="width:100%;" name="<?php echo esc_attr($option_name); ?>[buttons][<?php echo intval($i); ?>][target_selector]" value="<?php echo esc_attr($button['target_selector']); ?>" placeholder=".elementor-search-form__toggle" />
+                      </label>
+                      <span class="description">Si lo dejas vacío, se usa un selector sugerido para Elementor o Royal Addons según el tipo/proveedor.</span>
                     </p>
                     <p>
                       <label>Color del ícono<br />
@@ -312,17 +375,36 @@ final class FVD_Mobile_Bottom_Bar {
       $color = isset($row['color']) ? sanitize_hex_color($row['color']) : $base['color'];
       $size = isset($row['size']) ? intval($row['size']) : $base['size'];
       $icon = isset($row['icon']) ? sanitize_key($row['icon']) : $base['icon'];
+      $label = isset($row['label']) ? sanitize_text_field($row['label']) : $base['label'];
+      $action_type = isset($row['action_type']) ? sanitize_key($row['action_type']) : $base['action_type'];
+      $provider = isset($row['integration_provider']) ? sanitize_key($row['integration_provider']) : $base['integration_provider'];
+      $selector = isset($row['target_selector']) ? sanitize_text_field(trim($row['target_selector'])) : $base['target_selector'];
+
+      $allowed_action_types = array_keys($this->get_action_types());
+      if (!in_array($action_type, $allowed_action_types, true)) {
+        $action_type = $base['action_type'];
+      }
+
+      $allowed_providers = array_keys($this->get_integration_providers());
+      if (!in_array($provider, $allowed_providers, true)) {
+        $provider = $base['integration_provider'];
+      }
 
       if ($size < 12) $size = 12;
       if ($size > 48) $size = 48;
       if (!$color) $color = $base['color'];
       if (!$icon) $icon = $base['icon'];
+      if (!$label) $label = $base['label'];
 
       $buttons[] = [
         'url' => $url,
         'color' => $color,
         'size' => $size,
         'icon' => $icon,
+        'label' => $label,
+        'action_type' => $action_type,
+        'integration_provider' => $provider,
+        'target_selector' => $selector,
       ];
     }
 
@@ -354,12 +436,12 @@ final class FVD_Mobile_Bottom_Bar {
 
   private function get_default_buttons(): array {
     return [
-      ['url' => home_url('/'), 'color' => '#ffffff', 'size' => 22, 'icon' => 'dashicons-admin-home'],
-      ['url' => '#', 'color' => '#ffffff', 'size' => 22, 'icon' => 'dashicons-search'],
-      ['url' => '#', 'color' => '#ffffff', 'size' => 22, 'icon' => 'dashicons-cart'],
-      ['url' => '#', 'color' => '#ffffff', 'size' => 22, 'icon' => 'dashicons-admin-users'],
-      ['url' => '#', 'color' => '#ffffff', 'size' => 22, 'icon' => 'dashicons-format-gallery'],
-      ['url' => '#', 'color' => '#ffffff', 'size' => 22, 'icon' => 'dashicons-share'],
+      ['url' => home_url('/'), 'color' => '#ffffff', 'size' => 22, 'icon' => 'dashicons-admin-home', 'label' => '', 'action_type' => 'url', 'integration_provider' => 'none', 'target_selector' => ''],
+      ['url' => '#', 'color' => '#ffffff', 'size' => 22, 'icon' => 'dashicons-search', 'label' => '', 'action_type' => 'search', 'integration_provider' => 'elementor', 'target_selector' => ''],
+      ['url' => '#', 'color' => '#ffffff', 'size' => 22, 'icon' => 'dashicons-cart', 'label' => '', 'action_type' => 'cart', 'integration_provider' => 'elementor', 'target_selector' => ''],
+      ['url' => '#', 'color' => '#ffffff', 'size' => 22, 'icon' => 'dashicons-admin-users', 'label' => '', 'action_type' => 'url', 'integration_provider' => 'none', 'target_selector' => ''],
+      ['url' => '#', 'color' => '#ffffff', 'size' => 22, 'icon' => 'dashicons-format-gallery', 'label' => '', 'action_type' => 'url', 'integration_provider' => 'none', 'target_selector' => ''],
+      ['url' => '#', 'color' => '#ffffff', 'size' => 22, 'icon' => 'dashicons-share', 'label' => '', 'action_type' => 'url', 'integration_provider' => 'none', 'target_selector' => ''],
     ];
   }
 
@@ -422,6 +504,48 @@ final class FVD_Mobile_Bottom_Bar {
     }
     $data = get_plugin_data(__FILE__, false, false);
     return $data['Version'] ?? '0.0.0';
+  }
+
+  private function get_action_types(): array {
+    return [
+      'url' => 'Enlace URL',
+      'search' => 'Abrir buscador',
+      'cart' => 'Abrir mini carrito',
+      'custom_trigger' => 'Disparar selector personalizado',
+    ];
+  }
+
+  private function get_integration_providers(): array {
+    return [
+      'none' => 'Ninguno',
+      'elementor' => 'Elementor',
+      'royal-elementor' => 'Royal Elementor Addons',
+      'custom' => 'Personalizado',
+    ];
+  }
+
+  private function get_default_selector(string $action_type, string $provider): string {
+    if ($provider === 'custom' || $provider === 'none') {
+      return '';
+    }
+
+    if ($action_type === 'search' && $provider === 'elementor') {
+      return '.elementor-search-form__toggle, .elementor-widget-search-form .elementor-search-form__icon';
+    }
+
+    if ($action_type === 'search' && $provider === 'royal-elementor') {
+      return '.rea-ajax-search-toggle, .rea-search-toggle, .wpr-search-toggle';
+    }
+
+    if ($action_type === 'cart' && $provider === 'elementor') {
+      return '.elementor-menu-cart__toggle_button, .elementor-widget-woocommerce-menu-cart .elementor-menu-cart__toggle_button';
+    }
+
+    if ($action_type === 'cart' && $provider === 'royal-elementor') {
+      return '.rea-mini-cart-toggle, .wpr-mini-cart-toggle, .wpr-cart-toggle';
+    }
+
+    return '';
   }
 }
 
